@@ -4,3 +4,8 @@ reports/
 dist/
 download/
 lib/Doctrine/Common/
+/nbproject/private/
+/nbproject
+/tests/drola
+/vendor
+composer.lock
