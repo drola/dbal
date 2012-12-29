@@ -49,6 +49,7 @@ final class DriverManager
             'mysqli' => 'Doctrine\DBAL\Driver\Mysqli\Driver',
             'drizzle_pdo_mysql'  => 'Doctrine\DBAL\Driver\DrizzlePDOMySql\Driver',
             'sqlsrv' => 'Doctrine\DBAL\Driver\SQLSrv\Driver',
+            'ibase' => 'Doctrine\DBAL\Driver\Ibase\Driver'
             );
 
     /** Private constructor. This class cannot be instantiated. */
