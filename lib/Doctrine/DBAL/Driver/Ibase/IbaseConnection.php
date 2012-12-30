@@ -61,11 +61,20 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
     public function beginTransaction() {
         $this->_transResource = ibase_trans(IBASE_DEFAULT, $this->_conn);
     }
+    
+    public function getTransaction() {
+        return $this->_transResource;
+    }
+    
+    public function getConnection() {
+        return $this->_conn;
+    }
 
     public function commit() {
         if (!ibase_commit($this->_transResource ? $this->_transResource : $this->_conn)) {
             throw new IbaseException(ibase_errmsg());
         }
+        $this->_transResource = null;
     }
 
     public function errorCode() {
@@ -100,7 +109,7 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
         if (!$stmt) {
             throw new IbaseException(ibase_errmsg());
         }
-        return new IbaseStatement($stmt);
+        return new IbaseStatement($stmt, $this);
     }
 
     public function query() {
@@ -124,6 +133,8 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
         if (!ibase_commit($this->_transResource ? $this->_transResource : $this->_conn)) {
             throw new IbaseException(ibase_errmsg());
         }
+        
+        $this->_transResource = null;
     }
 
 }
