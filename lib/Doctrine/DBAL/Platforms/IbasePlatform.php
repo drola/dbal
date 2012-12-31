@@ -50,6 +50,14 @@ class IbasePlatform extends AbstractPlatform {
     public function getIntegerTypeDeclarationSQL(array $columnDef) {
         return 'INTEGER';
     }
+    
+    /**
+     * {@inheritDoc}
+     */
+    protected function _getCommonIntegerTypeDeclarationSQL(array $columnDef)
+    {
+        return '';
+    }
 
     public function getName() {
         return 'ibase';
@@ -196,7 +204,107 @@ class IbasePlatform extends AbstractPlatform {
     }
 
     
+    /**
+     * {@inheritDoc}
+     */
+    public function getSubstringExpression($value, $position, $length = null)
+    {
+        if ($length !== null) {
+            return "SUBSTR($value, $position, $position+$length)";
+        }
+
+        return "SUBSTR($value, $position)";
+    }
     
+    /**
+     * {@inheritDoc}
+     */
+    public function getNowExpression($type = 'timestamp')
+    {
+        switch ($type) {
+            case 'date':
+                return 'CURRENT_DATE';
+            case 'time':
+                return 'CURRENT_TIME';
+            case 'timestamp':
+            default:
+                return 'CURRENT_TIMESTAMP';
+        }
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getCreateSequenceSQL(\Doctrine\DBAL\Schema\Sequence $sequence)
+    {
+        if($sequence->getAllocationSize() != 1) {
+            throw DBALException::notSupported(__METHOD__.': Only sequences with step of 1 are supported.');
+        }
+    
+        return 'CREATE SEQUENCE ' . $sequence->getQuotedName($this) .'; '.
+               ' ALTER SEQUENCE '.$sequence->getQuotedName($this).' RESTART WITH '.$sequence->getInitialValue();
+        
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getDropSequenceSQL($sequence)
+    {
+        if ($sequence instanceof \Doctrine\DBAL\Schema\Sequence) {
+            $sequence = $sequence->getQuotedName($this);
+        }
+        return 'DROP SEQUENCE ' . $sequence;
+    }
+    
+    public function getSequenceNextValSQL($sequenceName)
+    {
+        return 'SELECT NEXT VALUE FOR \'' . $sequenceName . '\' FROM RDB$DATABASE';
+    }
+    
+    public function getListSequencesSQL($database)
+    {
+        return 'SELECT RDB$GENERATOR_NAME sequence_name FROM RDB$GENERATORS WHERE RDB$SYSTEM_FLAG=0';
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    protected function _getCreateTableSQL($table, array $columns, array $options = array())
+    {
+        $indexes = isset($options['indexes']) ? $options['indexes'] : array();
+        $options['indexes'] = array();
+        $sql = parent::_getCreateTableSQL($table, $columns, $options);
+
+        foreach ($columns as $name => $column) {
+            if (isset($column['sequence'])) {
+                $sql[] = $this->getCreateSequenceSQL($column['sequence'], 1);
+            }
+
+            /*if (isset($column['autoincrement']) && $column['autoincrement'] ||
+               (isset($column['autoinc']) && $column['autoinc'])) {
+                $sql = array_merge($sql, $this->getCreateAutoincrementSql($name, $table));
+            }*/
+            //TODO!
+        }
+
+        if (isset($indexes) && ! empty($indexes)) {
+            foreach ($indexes as $index) {
+                $sql[] = $this->getCreateIndexSQL($index, $table);
+            }
+        }
+
+        return $sql;
+    }
+    
+    
+    /**
+     * {@inheritDoc}
+     
+    public function getCreateDatabaseSQL($name)
+    {
+        return 'CREATE DATABASE \'' . $name.'\'';
+    }*/
     
 
 }
