@@ -89,10 +89,13 @@ class IbaseStatement implements \IteratorAggregate, Statement {
 
         $this->_stmtResult = $retval;
 
-        if ($trans = $this->_connection->getTransaction())
+        if ($trans = $this->_connection->getTransaction()) {
             $this->_stmtRowCount = ibase_affected_rows($trans);
-        else
+        } else {
             $this->_stmtRowCount = ibase_affected_rows($this->_connection->getConnection());
+        }
+        
+        ibase_commit_ret($this->_connection->getConnection()); 
 
         return $retval;
     }
@@ -151,8 +154,7 @@ class IbaseStatement implements \IteratorAggregate, Statement {
     /**
      * {@inheritdoc}
      */
-    public function setFetchMode($fetchMode, $arg2 = null, $arg3 = null)
-    {
+    public function setFetchMode($fetchMode, $arg2 = null, $arg3 = null) {
         $this->_defaultFetchMode = $fetchMode;
     }
 

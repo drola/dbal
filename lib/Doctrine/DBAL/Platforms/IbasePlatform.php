@@ -17,6 +17,7 @@ class IbasePlatform extends AbstractPlatform {
             'char' => 'string',
             'timestamp' => 'datetime',
             'decimal' => 'decimal',
+            'long' => 'bigint',
             'float' => 'float',
             'blob' => 'blob',
             'integer' => 'integer',
@@ -27,7 +28,8 @@ class IbasePlatform extends AbstractPlatform {
             'double' => 'float',
             'smallint' => 'smallint',
             'date' => 'date',
-            'time' => 'time'
+            'time' => 'time',
+            'text' => 'string'
         );
     }
 
@@ -136,10 +138,11 @@ class IbasePlatform extends AbstractPlatform {
      * {@inheritDoc}
      */
     public function getListTableIndexesSQL($table, $currentDatabase = null) {
-        return 'SELECT INDICES.RDB$INDEX_NAME NAME, RDB$FIELD_NAME COLNAME, RDB$UNIQUE_FLAG UNIQUERULE
+        return 'SELECT INDICES.RDB$INDEX_NAME name, RDB$FIELD_NAME column_name, RDB$UNIQUE_FLAG is_unique, CASE cs.RDB$CONSTRAINT_TYPE when \'PRIMARY KEY\' then 1 else 0 end is_primary
             FROM RDB$INDICES INDICES
             LEFT JOIN RDB$INDEX_SEGMENTS SEGMENTS ON INDICES.RDB$INDEX_NAME=SEGMENTS.RDB$INDEX_NAME
-            WHERE INDICES.RDB$RELATION_NAME=\'' . $table . '\'';
+            LEFT JOIN RDB$RELATION_CONSTRAINTS cs ON cs.RDB$INDEX_NAME = INDICES.RDB$INDEX_NAME AND cs.RDB$CONSTRAINT_TYPE=\'PRIMARY KEY\'
+            WHERE INDICES.RDB$RELATION_NAME=\'' . $table . '\' AND RDB$SYSTEM_FLAG=0';
     }
 
     public function getListViewsSQL($database) {
@@ -293,7 +296,7 @@ class IbasePlatform extends AbstractPlatform {
                 $sql[] = $this->getCreateIndexSQL($index, $table);
             }
         }
-
+        
         return $sql;
     }
     
@@ -305,6 +308,60 @@ class IbasePlatform extends AbstractPlatform {
     {
         return 'CREATE DATABASE \'' . $name.'\'';
     }*/
+    
+    /**
+     * Firebird does not support this feature.
+     *
+     * @return boolean
+     */
+    public function supportsCreateDropDatabase()
+    {
+        return false;
+    }
+    
+    public function supportsForeignKeyConstraints() {
+        return false;
+    }
+    
+    /**
+     * Does this platform views ?
+     *
+     * @return boolean
+     */
+    public function supportsViews()
+    {
+        return false;
+    }
+    /**
+     * {@inheritDoc}
+     */
+    protected function getReservedKeywordsClass()
+    {
+        return 'Doctrine\DBAL\Platforms\Keywords\IbaseKeywords';
+    }
+    
+    protected function quote($string) {
+        return str_replace('\'', '\'\'', $string);
+    }
+    
+    public function getListTableColumnsSQL($table, $database = null) {
+        return  'select
+                    RF.RDB$RELATION_NAME, \'\', RF.RDB$FIELD_NAME, RF.RDB$DESCRIPTION, T.RDB$TYPE_NAME,
+                    RF.RDB$DEFAULT_VALUE, RF.RDB$NULL_FLAG, RF.RDB$FIELD_POSITION, F.RDB$FIELD_LENGTH,
+                    F.RDB$CHARACTER_LENGTH, F.RDB$FIELD_SCALE, F.RDB$FIELD_PRECISION,
+                    IXS.RDB$FIELD_POSITION, IXS.RDB$FIELD_POSITION, F.RDB$FIELD_SUB_TYPE
+                from RDB$RELATION_FIELDS RF
+                left join RDB$RELATION_CONSTRAINTS RC
+                    on (RF.RDB$RELATION_NAME = RC.RDB$RELATION_NAME and RC.RDB$CONSTRAINT_TYPE = \'PRIMARY KEY\')
+                left join RDB$INDEX_SEGMENTS IXS
+                    on (IXS.RDB$FIELD_NAME = RF.RDB$FIELD_NAME and RC.RDB$INDEX_NAME = IXS.RDB$INDEX_NAME)
+                inner join RDB$FIELDS F on (RF.RDB$FIELD_SOURCE = F.RDB$FIELD_NAME)
+                inner join RDB$TYPES T on (T.RDB$TYPE = F.RDB$FIELD_TYPE and T.RDB$FIELD_NAME = \'RDB$FIELD_TYPE\')
+                where (UPPER(RF.RDB$RELATION_NAME) = UPPER(\''.$this->quote($table).'\')) 
+                order by RF.RDB$FIELD_POSITION';
+        
+        
+    }
     
 
 }

@@ -88,6 +88,9 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
     public function exec($statement) {
         $stmt = $this->prepare($statement);
         $stmt->execute();
+        if(!$this->_transResource) {
+            ibase_commit_ret($this->_conn);
+        }
         return $stmt->rowCount();
     }
 
@@ -117,6 +120,9 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
         $sql = $args[0];
         $stmt = $this->prepare($sql);
         $stmt->execute();
+        if(!$this->_transResource) {
+            ibase_commit_ret($this->_conn);
+        }
         return $stmt;
     }
 
