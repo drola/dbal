@@ -5,6 +5,8 @@ namespace Doctrine\DBAL\Platforms;
 use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\Schema\Index;
 use Doctrine\DBAL\Schema\TableDiff;
+use Doctrine\DBAL\Schema\Sequence;
+use Doctrine\DBAL\Schema\ForeignKeyConstraint;
 
 class IbasePlatform extends AbstractPlatform {
 
@@ -29,7 +31,7 @@ class IbasePlatform extends AbstractPlatform {
             'smallint' => 'smallint',
             'date' => 'date',
             'time' => 'time',
-            'text' => 'string'
+            'text' => 'text'
         );
     }
 
@@ -52,12 +54,11 @@ class IbasePlatform extends AbstractPlatform {
     public function getIntegerTypeDeclarationSQL(array $columnDef) {
         return 'INTEGER';
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    protected function _getCommonIntegerTypeDeclarationSQL(array $columnDef)
-    {
+    protected function _getCommonIntegerTypeDeclarationSQL(array $columnDef) {
         return '';
     }
 
@@ -106,7 +107,7 @@ class IbasePlatform extends AbstractPlatform {
      * {@inheritDoc}
      */
     public function getDateAddDaysExpression($date, $days) {
-        return 'DATE_ADD(' . $days . ' DAY, ' . $date . ')';
+        return 'DATEADD(' . $days . ' DAY TO ' . $date . ')';
     }
 
     /**
@@ -120,7 +121,23 @@ class IbasePlatform extends AbstractPlatform {
      * {@inheritDoc}
      */
     public function getDateAddMonthExpression($date, $months) {
-        return 'DATE_ADD(' . $months . ' MONTH, ' . $date . ')';
+        return 'DATEADD(' . $months . ' MONTH TO ' . $date . ')';
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getBitAndComparisonExpression($value1, $value2)
+    {
+        return 'BIN_AND(' . $value1 . ', ' . $value2 . ')';
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getBitOrComparisonExpression($value1, $value2)
+    {
+        return 'BIN_OR(' . $value1 . ', ' . $value2 . ')';
     }
 
     /**
@@ -142,7 +159,7 @@ class IbasePlatform extends AbstractPlatform {
             FROM RDB$INDICES INDICES
             LEFT JOIN RDB$INDEX_SEGMENTS SEGMENTS ON INDICES.RDB$INDEX_NAME=SEGMENTS.RDB$INDEX_NAME
             LEFT JOIN RDB$RELATION_CONSTRAINTS cs ON cs.RDB$INDEX_NAME = INDICES.RDB$INDEX_NAME AND cs.RDB$CONSTRAINT_TYPE=\'PRIMARY KEY\'
-            WHERE INDICES.RDB$RELATION_NAME=\'' . $table . '\' AND RDB$SYSTEM_FLAG=0';
+            WHERE INDICES.RDB$RELATION_NAME=UPPER(\'' . $table . '\') AND RDB$SYSTEM_FLAG=0';
     }
 
     public function getListViewsSQL($database) {
@@ -206,24 +223,21 @@ class IbasePlatform extends AbstractPlatform {
             WHERE REL.RDB$SYSTEM_FLAG=0;';
     }
 
-    
     /**
      * {@inheritDoc}
      */
-    public function getSubstringExpression($value, $position, $length = null)
-    {
+    public function getSubstringExpression($value, $position, $length = null) {
         if ($length !== null) {
             return "SUBSTR($value, $position, $position+$length)";
         }
 
         return "SUBSTR($value, $position)";
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getNowExpression($type = 'timestamp')
-    {
+    public function getNowExpression($type = 'timestamp') {
         switch ($type) {
             case 'date':
                 return 'CURRENT_DATE';
@@ -234,47 +248,93 @@ class IbasePlatform extends AbstractPlatform {
                 return 'CURRENT_TIMESTAMP';
         }
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getCreateSequenceSQL(\Doctrine\DBAL\Schema\Sequence $sequence)
-    {
-        if($sequence->getAllocationSize() != 1) {
-            throw DBALException::notSupported(__METHOD__.': Only sequences with step of 1 are supported.');
+    public function getCreateSequenceSQL(\Doctrine\DBAL\Schema\Sequence $sequence) {
+        if ($sequence->getAllocationSize() != 1 || $sequence->getInitialValue() != 1) {
+            throw DBALException::notSupported(__METHOD__ . ': Only sequences with step of 1 are supported.');
         }
-    
-        return 'CREATE SEQUENCE ' . $sequence->getQuotedName($this) .'; '.
-               ' ALTER SEQUENCE '.$sequence->getQuotedName($this).' RESTART WITH '.$sequence->getInitialValue();
         
+        return 'CREATE SEQUENCE ' . $sequence->getQuotedName($this);
+           //     ' ALTER SEQUENCE ' . $sequence->getQuotedName($this) . ' RESTART WITH ' . $sequence->getInitialValue();
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getDropSequenceSQL($sequence)
-    {
+    public function getDropSequenceSQL($sequence) {
         if ($sequence instanceof \Doctrine\DBAL\Schema\Sequence) {
             $sequence = $sequence->getQuotedName($this);
         }
         return 'DROP SEQUENCE ' . $sequence;
     }
     
-    public function getSequenceNextValSQL($sequenceName)
+    /**
+     * {@inheritDoc}
+     */
+    public function quoteSingleIdentifier($str)
     {
-        return 'SELECT NEXT VALUE FOR \'' . $sequenceName . '\' FROM RDB$DATABASE';
+        $c = $this->getIdentifierQuoteCharacter();
+        
+        //Uppercase and escape
+        return $c . str_replace($c, $c.$c, strtoupper($str)) . $c;
     }
     
-    public function getListSequencesSQL($database)
+    /**
+     * {@inheritDoc}
+     */
+    protected function doModifyLimitQuery($query, $limit, $offset)
     {
+        $clause = '';
+        if ($limit !== null) {
+            $clause .= ' FIRST ' . $limit;
+        }
+
+        if ($offset !== null) {
+            $clause .= ' SKIP ' . $offset;
+        }
+
+        return preg_replace("/^\s*SELECT/i", "SELECT ".$clause, $query);
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getDateDiffExpression($date1, $date2)
+    {
+        return "DATEDIFF(day, CAST($date2 AS timestamp), CAST($date1 AS timestamp))";
+    }
+
+    public function getSequenceNextValSQL($sequenceName) {
+        return 'SELECT NEXT VALUE FOR \'' . $sequenceName . '\' FROM RDB$DATABASE';
+    }
+
+    public function getListSequencesSQL($database) {
         return 'SELECT RDB$GENERATOR_NAME sequence_name FROM RDB$GENERATORS WHERE RDB$SYSTEM_FLAG=0';
     }
     
     /**
      * {@inheritDoc}
      */
-    protected function _getCreateTableSQL($table, array $columns, array $options = array())
+    public function getTruncateTableSQL($tableName, $cascade = false)
     {
+        return 'DELETE FROM '.$tableName;
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getDummySelectSQL()
+    {
+        return 'SELECT 1 FROM RDB$DATABASE';
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function _getCreateTableSQL($table, array $columns, array $options = array()) {
         $indexes = isset($options['indexes']) ? $options['indexes'] : array();
         $options['indexes'] = array();
         $sql = parent::_getCreateTableSQL($table, $columns, $options);
@@ -284,70 +344,66 @@ class IbasePlatform extends AbstractPlatform {
                 $sql[] = $this->getCreateSequenceSQL($column['sequence'], 1);
             }
 
-            /*if (isset($column['autoincrement']) && $column['autoincrement'] ||
-               (isset($column['autoinc']) && $column['autoinc'])) {
-                $sql = array_merge($sql, $this->getCreateAutoincrementSql($name, $table));
-            }*/
-            //TODO!
+             if (isset($column['autoincrement']) && $column['autoincrement'] ||
+              (isset($column['autoinc']) && $column['autoinc'])) {
+              $sql = array_merge($sql, $this->getCreateAutoincrementSql($name, $table));
+              } 
         }
 
-        if (isset($indexes) && ! empty($indexes)) {
+        if (isset($indexes) && !empty($indexes)) {
             foreach ($indexes as $index) {
                 $sql[] = $this->getCreateIndexSQL($index, $table);
             }
         }
-        
+
         return $sql;
     }
-    
-    
+
     /**
      * {@inheritDoc}
-     
-    public function getCreateDatabaseSQL($name)
-    {
-        return 'CREATE DATABASE \'' . $name.'\'';
-    }*/
-    
+
+      public function getCreateDatabaseSQL($name)
+      {
+      return 'CREATE DATABASE \'' . $name.'\'';
+      } */
+
     /**
      * Firebird does not support this feature.
      *
      * @return boolean
      */
-    public function supportsCreateDropDatabase()
-    {
+    public function supportsCreateDropDatabase() {
         return false;
     }
-    
+
     public function supportsForeignKeyConstraints() {
         return false;
     }
-    
+
     /**
      * Does this platform views ?
      *
      * @return boolean
      */
-    public function supportsViews()
-    {
+    public function supportsViews() {
         return false;
     }
+
     /**
      * {@inheritDoc}
      */
-    protected function getReservedKeywordsClass()
-    {
+    protected function getReservedKeywordsClass() {
         return 'Doctrine\DBAL\Platforms\Keywords\IbaseKeywords';
     }
-    
+
     protected function quote($string) {
         return str_replace('\'', '\'\'', $string);
     }
-    
+
     public function getListTableColumnsSQL($table, $database = null) {
-        return  'select
-                    RF.RDB$RELATION_NAME, \'\', RF.RDB$FIELD_NAME, RF.RDB$DESCRIPTION, T.RDB$TYPE_NAME,
-                    RF.RDB$DEFAULT_VALUE, RF.RDB$NULL_FLAG, RF.RDB$FIELD_POSITION, F.RDB$FIELD_LENGTH,
+        return 'select
+                    RF.RDB$RELATION_NAME, \'\', RF.RDB$FIELD_NAME, RF.RDB$DESCRIPTION, T.RDB$TYPE_NAME, ST.RDB$TYPE_NAME RDB$SUB_TYPE_NAME,
+                    RF.RDB$DEFAULT_VALUE, RF.RDB$DEFAULT_SOURCE, RF.RDB$NULL_FLAG, RF.RDB$FIELD_POSITION, F.RDB$FIELD_LENGTH,
                     F.RDB$CHARACTER_LENGTH, F.RDB$FIELD_SCALE, F.RDB$FIELD_PRECISION,
                     IXS.RDB$FIELD_POSITION, IXS.RDB$FIELD_POSITION, F.RDB$FIELD_SUB_TYPE
                 from RDB$RELATION_FIELDS RF
@@ -357,11 +413,61 @@ class IbasePlatform extends AbstractPlatform {
                     on (IXS.RDB$FIELD_NAME = RF.RDB$FIELD_NAME and RC.RDB$INDEX_NAME = IXS.RDB$INDEX_NAME)
                 inner join RDB$FIELDS F on (RF.RDB$FIELD_SOURCE = F.RDB$FIELD_NAME)
                 inner join RDB$TYPES T on (T.RDB$TYPE = F.RDB$FIELD_TYPE and T.RDB$FIELD_NAME = \'RDB$FIELD_TYPE\')
-                where (UPPER(RF.RDB$RELATION_NAME) = UPPER(\''.$this->quote($table).'\')) 
+                left join RDB$TYPES ST on (ST.RDB$TYPE = F.RDB$FIELD_SUB_TYPE and ST.RDB$FIELD_NAME = \'RDB$FIELD_SUB_TYPE\')
+                where (UPPER(RF.RDB$RELATION_NAME) = UPPER(\'' . $this->quote($table) . '\')) 
                 order by RF.RDB$FIELD_POSITION';
-        
-        
     }
-    
+
+    public function getCreateAutoincrementSql($name, $table, $start = 1) {
+        $table = strtoupper($table);
+        $sql = array();
+
+        $indexName = $table . '_AI_PK';
+
+        $idx = new Index($indexName, array($name), true, true);
+
+        $sql[] = 'execute block AS
+DECLARE VARIABLE cnt INTEGER = 0;
+BEGIN
+  SELECT COUNT(*)
+    FROM RDB$RELATION_CONSTRAINTS WHERE RDB$RELATION_NAME=\'' . $table . '\' AND RDB$CONSTRAINT_TYPE=\'PRIMARY KEY\'
+    INTO :cnt;
+  IF (:cnt = 0) then
+    EXECUTE STATEMENT \'' . $this->getCreateConstraintSQL($idx, $table) . '\'
+      WITH AUTONOMOUS TRANSACTION;
+  SUSPEND;
+END;';
+
+        $sequenceName = $table . '_SEQ';
+        $sequence = new Sequence($sequenceName, $start);
+        $sql[] = $this->getCreateSequenceSQL($sequence);
+
+        $triggerName = $table . '_AI_PK';
+        $sql[] = 'CREATE TRIGGER ' . $triggerName . ' FOR ' . $table . '
+   ACTIVE BEFORE INSERT POSITION 0
+   AS
+BEGIN
+   IF (NEW.'.$name.' IS NULL)
+    then BEGIN
+      NEW.'.$name.' = GEN_ID(' . $sequenceName . ', 1);
+      RDB$SET_CONTEXT(\'USER_SESSION\', \'LAST_INSERT_ID\', NEW.'.$name.');
+     END
+END;';
+
+        return $sql;
+    }
+
+    public function getDropAutoincrementSql($table) {
+        $table = strtoupper($table);
+        $trigger = $table . '_AI_PK';
+
+        $sql[] = 'DROP TRIGGER ' . $trigger;
+        $sql[] = $this->getDropSequenceSQL($table . '_SEQ');
+
+        $indexName = $table . '_AI_PK';
+        $sql[] = $this->getDropConstraintSQL($indexName, $table);
+
+        return $sql;
+    }
 
 }

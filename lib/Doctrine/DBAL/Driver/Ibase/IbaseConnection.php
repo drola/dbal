@@ -9,6 +9,8 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
      * @var mixed Firebird/InterBase link identifier
      */
     private $_conn = null;
+    
+    private $_portability = \Doctrine\DBAL\Portability\Connection::PORTABILITY_NONE;
 
     /**
      *
@@ -34,10 +36,17 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
                                     $params['dbname'], $params['host'], $params['port']), $username, $password, $params['charset'], $params['buffers'], $params['dialect'], $params['role']
             );
         }
+        
 
         if (!$this->_conn) {
             throw new IbaseException(ibase_errmsg());
         }
+        
+        $this->_portability = isset($params['portability'])?$params['portability']:\Doctrine\DBAL\Portability\Connection::PORTABILITY_NONE;
+    }
+    
+    public function isRtrimPortabilityRequired() {
+        return $this->_portability & \Doctrine\DBAL\Portability\Connection::PORTABILITY_RTRIM;
     }
 
     /**
@@ -63,7 +72,7 @@ class IbaseConnection implements \Doctrine\DBAL\Driver\Connection {
     }
     
     public function getTransaction() {
-        return $this->_transResource;
+        return (is_resource($this->_transResource) ? $this->_transResource : null);
     }
     
     public function getConnection() {

@@ -10,6 +10,7 @@ class IbaseStatement implements \IteratorAggregate, Statement {
     private $_stmtResult = null;
     private $_bindParam = array();
     private $_defaultFetchMode = \PDO::FETCH_BOTH;
+    private $_fetchModeParam = null;
     private $_stmtRowCount = 0;
     private $_connection = null;
 
@@ -93,9 +94,11 @@ class IbaseStatement implements \IteratorAggregate, Statement {
             $this->_stmtRowCount = ibase_affected_rows($trans);
         } else {
             $this->_stmtRowCount = ibase_affected_rows($this->_connection->getConnection());
+            ibase_commit_ret($this->_connection->getConnection()); //TODO! THIS IS DIRTY!
         }
-        
-        ibase_commit_ret($this->_connection->getConnection()); 
+
+        //ibase_commit_ret($this->_connection->getConnection()); //TODO! THIS IS DIRTY!
+
 
         return $retval;
     }
@@ -103,18 +106,75 @@ class IbaseStatement implements \IteratorAggregate, Statement {
     /**
      * {@inheritdoc}
      */
-    public function fetch($fetchMode = null) {
+    public function fetch($fetchMode = null, $param = null) {
         $fetchMode = $fetchMode ? : $this->_defaultFetchMode;
+        $param = $param ? $param : $this->_fetchModeParam;
+        $rtrim = function($s) {
+                    return is_string($s) ? rtrim($s) : $s;
+                };
+
         switch ($fetchMode) {
             case \PDO::FETCH_BOTH:
                 $row = ibase_fetch_assoc($this->_stmtResult, IBASE_TEXT);
-                return array_merge($row, array_values($row));
+
+                if (is_array($row)) {
+                    if ($this->_connection->isRtrimPortabilityRequired()) {
+                        $row = array_map($rtrim, $row);
+                    }
+                    return array_merge($row, array_values($row));
+                } else {
+                    return false;
+                }
             case \PDO::FETCH_ASSOC:
-                return ibase_fetch_assoc($this->_stmtResult, IBASE_TEXT);
+                $row = ibase_fetch_assoc($this->_stmtResult, IBASE_TEXT);
+                if (is_array($row)) {
+                    if ($this->_connection->isRtrimPortabilityRequired()) {
+                        $row = array_map($rtrim, $row);
+                    }
+                    return $row;
+                } else {
+                    return false;
+                }
             case \PDO::FETCH_NUM:
-                return ibase_fetch_row($this->_stmtResult, IBASE_TEXT);
+                $row = ibase_fetch_row($this->_stmtResult, IBASE_TEXT);
+                if (is_array($row)) {
+                    if ($this->_connection->isRtrimPortabilityRequired()) {
+                        $row = array_map($rtrim, $row);
+                    }
+                    return $row;
+                } else {
+                    return false;
+                }
             case \PDO::FETCH_OBJ:
-                return ibase_fetch_object($this->_stmtResult, IBASE_TEXT);
+                $obj = ibase_fetch_object($this->_stmtResult, IBASE_TEXT);
+                if ($obj && $this->_connection->isRtrimPortabilityRequired()) {
+                    $vars = get_object_vars();
+                    foreach ($vars as $k => $v) {
+                        $obj->$k = $rtrim($v);
+                    }
+                }
+                return $obj;
+            case \PDO::FETCH_CLASS:
+                $row = ibase_fetch_assoc($this->_stmtResult, IBASE_TEXT);
+                if ($row) {
+                    $instance = new $param();
+                    $vars = get_class_vars($param);
+                    $original_keys = array_keys($vars);
+                    $lowercase_keys = array_keys(array_change_key_case($vars, CASE_LOWER));
+                    $vars = array_combine($lowercase_keys, $original_keys);
+                    foreach ($row as $key => $val) {
+                        if (isset($vars[strtolower($key)])) {
+                            if ($this->_connection->isRtrimPortabilityRequired()) {
+
+                                $instance->$vars[strtolower($key)] = $rtrim($val);
+                            } else {
+                                $instance->$vars[strtolower($key)] = $val;
+                            }
+                        }
+                    }
+                    return $instance;
+                } else
+                    return false;
             default:
                 throw new IbaseException("Given Fetch-Style " . $fetchMode . " is not supported.");
         }
@@ -123,12 +183,20 @@ class IbaseStatement implements \IteratorAggregate, Statement {
     /**
      * {@inheritdoc}
      */
-    public function fetchAll($fetchMode = null) {
-        $rows = array();
-        while ($row = $this->fetch($fetchMode)) {
-            $rows[] = $row;
+    public function fetchAll($fetchMode = null, $param = null) {
+        switch ($fetchMode) {
+            case \PDO::FETCH_COLUMN:
+                $data = $this->fetchAll(\PDO::FETCH_NUM, $param);
+                return array_map(function($row) {
+                                    return $row[0];
+                                }, $data);
+            default:
+                $rows = array();
+                while ($row = $this->fetch($fetchMode, $param)) {
+                    $rows[] = $row;
+                }
+                return $rows;
         }
-        return $rows;
     }
 
     /**
@@ -156,6 +224,7 @@ class IbaseStatement implements \IteratorAggregate, Statement {
      */
     public function setFetchMode($fetchMode, $arg2 = null, $arg3 = null) {
         $this->_defaultFetchMode = $fetchMode;
+        $this->_fetchModeParam = $arg2;
     }
 
 }
