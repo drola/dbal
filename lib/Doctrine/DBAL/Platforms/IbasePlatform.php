@@ -7,6 +7,7 @@ use Doctrine\DBAL\Schema\Index;
 use Doctrine\DBAL\Schema\TableDiff;
 use Doctrine\DBAL\Schema\Sequence;
 use Doctrine\DBAL\Schema\ForeignKeyConstraint;
+use Doctrine\DBAL\Schema\Table;
 
 class IbasePlatform extends AbstractPlatform {
 
@@ -123,20 +124,44 @@ class IbasePlatform extends AbstractPlatform {
     public function getDateAddMonthExpression($date, $months) {
         return 'DATEADD(' . $months . ' MONTH TO ' . $date . ')';
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getBitAndComparisonExpression($value1, $value2)
-    {
+    public function getListTableForeignKeysSQL($table) {
+        $table = strtoupper($table);
+
+        return 'SELECT
+    FROM_TABLE.RDB$RELATION_NAME AS FROM_TABLE,
+    FROM_FIELD.RDB$FIELD_NAME AS FROM_FIELD,
+    TO_TABLE.RDB$RELATION_NAME TO_TABLE,
+    TO_FIELD.RDB$FIELD_NAME AS TO_FIELD,
+    REF.RDB$UPDATE_RULE AS UPDATE_RULE,
+    REF.RDB$DELETE_RULE AS DELETE_RULE,
+    RCS.RDB$CONSTRAINT_NAME AS CONSTRAINT_NAME,
+    FROM_FIELD.RDB$FIELD_POSITION AS FIELD_POSITION
+FROM
+    RDB$INDICES FROM_TABLE INNER JOIN RDB$INDEX_SEGMENTS FROM_FIELD ON FROM_FIELD.RDB$INDEX_NAME = FROM_TABLE.RDB$INDEX_NAME
+    INNER JOIN RDB$INDICES TO_TABLE ON TO_TABLE.RDB$INDEX_NAME = FROM_TABLE.RDB$FOREIGN_KEY
+    INNER JOIN RDB$INDEX_SEGMENTS TO_FIELD ON TO_TABLE.RDB$INDEX_NAME = TO_FIELD.RDB$INDEX_NAME
+    INNER JOIN RDB$RELATION_CONSTRAINTS RCS ON RCS.RDB$INDEX_NAME = FROM_FIELD.RDB$INDEX_NAME
+    INNER JOIN RDB$REF_CONSTRAINTS REF ON REF.RDB$CONSTRAINT_NAME = RCS.RDB$CONSTRAINT_NAME
+WHERE
+    FROM_TABLE.RDB$FOREIGN_KEY IS NOT NULL
+    AND FROM_TABLE.RDB$RELATION_NAME=\'' . $table . "'";
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getBitAndComparisonExpression($value1, $value2) {
         return 'BIN_AND(' . $value1 . ', ' . $value2 . ')';
     }
 
     /**
      * {@inheritDoc}
      */
-    public function getBitOrComparisonExpression($value1, $value2)
-    {
+    public function getBitOrComparisonExpression($value1, $value2) {
         return 'BIN_OR(' . $value1 . ', ' . $value2 . ')';
     }
 
@@ -159,7 +184,7 @@ class IbasePlatform extends AbstractPlatform {
             FROM RDB$INDICES INDICES
             LEFT JOIN RDB$INDEX_SEGMENTS SEGMENTS ON INDICES.RDB$INDEX_NAME=SEGMENTS.RDB$INDEX_NAME
             LEFT JOIN RDB$RELATION_CONSTRAINTS cs ON cs.RDB$INDEX_NAME = INDICES.RDB$INDEX_NAME AND cs.RDB$CONSTRAINT_TYPE=\'PRIMARY KEY\'
-            WHERE INDICES.RDB$RELATION_NAME=UPPER(\'' . $table . '\') AND RDB$SYSTEM_FLAG=0';
+            WHERE INDICES.RDB$RELATION_NAME=UPPER(\'' . $table . '\') AND RDB$SYSTEM_FLAG=0 ORDER BY RDB$INDEX_ID, RDB$FIELD_POSITION';
     }
 
     public function getListViewsSQL($database) {
@@ -256,9 +281,9 @@ class IbasePlatform extends AbstractPlatform {
         if ($sequence->getAllocationSize() != 1 || $sequence->getInitialValue() != 1) {
             throw DBALException::notSupported(__METHOD__ . ': Only sequences with step of 1 are supported.');
         }
-        
+
         return 'CREATE SEQUENCE ' . $sequence->getQuotedName($this);
-           //     ' ALTER SEQUENCE ' . $sequence->getQuotedName($this) . ' RESTART WITH ' . $sequence->getInitialValue();
+        //     ' ALTER SEQUENCE ' . $sequence->getQuotedName($this) . ' RESTART WITH ' . $sequence->getInitialValue();
     }
 
     /**
@@ -270,23 +295,21 @@ class IbasePlatform extends AbstractPlatform {
         }
         return 'DROP SEQUENCE ' . $sequence;
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function quoteSingleIdentifier($str)
-    {
+    public function quoteSingleIdentifier($str) {
         $c = $this->getIdentifierQuoteCharacter();
-        
+
         //Uppercase and escape
-        return $c . str_replace($c, $c.$c, strtoupper($str)) . $c;
+        return $c . str_replace($c, $c . $c, strtoupper($str)) . $c;
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    protected function doModifyLimitQuery($query, $limit, $offset)
-    {
+    protected function doModifyLimitQuery($query, $limit, $offset) {
         $clause = '';
         if ($limit !== null) {
             $clause .= ' FIRST ' . $limit;
@@ -296,14 +319,13 @@ class IbasePlatform extends AbstractPlatform {
             $clause .= ' SKIP ' . $offset;
         }
 
-        return preg_replace("/^\s*SELECT/i", "SELECT ".$clause, $query);
+        return preg_replace("/^\s*SELECT/i", "SELECT " . $clause, $query);
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getDateDiffExpression($date1, $date2)
-    {
+    public function getDateDiffExpression($date1, $date2) {
         return "DATEDIFF(day, CAST($date2 AS timestamp), CAST($date1 AS timestamp))";
     }
 
@@ -314,20 +336,18 @@ class IbasePlatform extends AbstractPlatform {
     public function getListSequencesSQL($database) {
         return 'SELECT RDB$GENERATOR_NAME sequence_name FROM RDB$GENERATORS WHERE RDB$SYSTEM_FLAG=0';
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getTruncateTableSQL($tableName, $cascade = false)
-    {
-        return 'DELETE FROM '.$tableName;
+    public function getTruncateTableSQL($tableName, $cascade = false) {
+        return 'DELETE FROM ' . $tableName;
     }
-    
+
     /**
      * {@inheritDoc}
      */
-    public function getDummySelectSQL()
-    {
+    public function getDummySelectSQL() {
         return 'SELECT 1 FROM RDB$DATABASE';
     }
 
@@ -344,10 +364,10 @@ class IbasePlatform extends AbstractPlatform {
                 $sql[] = $this->getCreateSequenceSQL($column['sequence'], 1);
             }
 
-             if (isset($column['autoincrement']) && $column['autoincrement'] ||
-              (isset($column['autoinc']) && $column['autoinc'])) {
-              $sql = array_merge($sql, $this->getCreateAutoincrementSql($name, $table));
-              } 
+            if (isset($column['autoincrement']) && $column['autoincrement'] ||
+                    (isset($column['autoinc']) && $column['autoinc'])) {
+                $sql = array_merge($sql, $this->getCreateAutoincrementSql($name, $table));
+            }
         }
 
         if (isset($indexes) && !empty($indexes)) {
@@ -447,10 +467,10 @@ END;';
    ACTIVE BEFORE INSERT POSITION 0
    AS
 BEGIN
-   IF (NEW.'.$name.' IS NULL)
+   IF (NEW.' . $name . ' IS NULL)
     then BEGIN
-      NEW.'.$name.' = GEN_ID(' . $sequenceName . ', 1);
-      RDB$SET_CONTEXT(\'USER_SESSION\', \'LAST_INSERT_ID\', NEW.'.$name.');
+      NEW.' . $name . ' = GEN_ID(' . $sequenceName . ', 1);
+      RDB$SET_CONTEXT(\'USER_SESSION\', \'LAST_INSERT_ID\', NEW.' . $name . ');
      END
 END;';
 
@@ -468,6 +488,84 @@ END;';
         $sql[] = $this->getDropConstraintSQL($indexName, $table);
 
         return $sql;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getAlterTableSQL(TableDiff $diff) {
+        $sql = array();
+        $commentsSQL = array();
+        $columnSql = array();
+
+        foreach ($diff->addedColumns as $column) {
+            if ($this->onSchemaAlterTableAddColumn($column, $diff, $columnSql)) {
+                continue;
+            }
+
+            $sql[] = 'ALTER TABLE ' . $diff->name . ' ADD ' . $this->getColumnDeclarationSQL($column->getQuotedName($this), $column->toArray());
+            if ($comment = $this->getColumnComment($column)) {
+                $commentsSQL[] = $this->getCommentOnColumnSQL($diff->name, $column->getName(), $comment);
+            }
+        }
+
+
+        foreach ($diff->changedColumns as $columnDiff) {
+            if ($this->onSchemaAlterTableChangeColumn($columnDiff, $diff, $columnSql)) {
+                continue;
+            }
+
+            $column = $columnDiff->column;
+            $sql[] = 'ALTER TABLE ' . $diff->name . ' ALTER COLUMN ' . $column->getQuotedName($this) . ' ' . $this->getColumnDeclarationSQL('', $column->toArray());
+            if ($columnDiff->hasChanged('comment') && $comment = $this->getColumnComment($column)) {
+                $commentsSQL[] = $this->getCommentOnColumnSQL($diff->name, $column->getName(), $comment);
+            }
+        }
+
+        foreach ($diff->renamedColumns as $oldColumnName => $column) {
+            if ($this->onSchemaAlterTableRenameColumn($oldColumnName, $column, $diff, $columnSql)) {
+                continue;
+            }
+
+            $sql[] = 'ALTER TABLE ' . $diff->name . ' ALTER COLUMN ' . $oldColumnName . ' TO ' . $column->getQuotedName($this);
+        }
+
+        foreach ($diff->removedColumns as $column) {
+            if ($this->onSchemaAlterTableRemoveColumn($column, $diff, $columnSql)) {
+                continue;
+            }
+
+            $sql[] = 'ALTER TABLE ' . $diff->name . ' DROP ' . $column->getQuotedName($this);
+        }
+
+
+        $tableSql = array();
+
+        if (!$this->onSchemaAlterTable($diff, $tableSql)) {
+            if ($diff->newName !== false) {
+                $sql[] = 'ALTER TABLE ' . $diff->name . ' RENAME TO ' . $diff->newName;
+            }
+
+            $sql = array_merge($sql, $this->_getAlterTableIndexForeignKeySQL($diff), $commentsSQL);
+        }
+
+        return array_merge($sql, $tableSql, $columnSql);
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    public function getDropForeignKeySQL($foreignKey, $table)
+    {
+        if ($foreignKey instanceof ForeignKeyConstraint) {
+            $foreignKey = $foreignKey->getQuotedName($this);
+        }
+
+        if ($table instanceof Table) {
+            $table = $table->getQuotedName($this);
+        }
+
+        return 'ALTER TABLE ' . $table . ' DROP CONSTRAINT ' . $foreignKey;
     }
 
 }

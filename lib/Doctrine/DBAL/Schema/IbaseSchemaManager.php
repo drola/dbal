@@ -215,11 +215,45 @@ class IbaseSchemaManager extends AbstractSchemaManager {
                 $buffer['primary'] = false;
             }
             $buffer['non_unique'] = ( $tableIndex['is_unique'] == 0 ) ? true : false;
-            $buffer['key_name'] = $keyName;
-            $buffer['column_name'] = $tableIndex['column_name'];
+            $buffer['key_name'] = rtrim(strtolower($keyName));
+            $buffer['column_name'] = rtrim(strtolower($tableIndex['column_name']));
             $indexBuffer[] = $buffer;
         }
         return parent::_getPortableTableIndexesList($indexBuffer, $tableName);
+    }
+    
+    protected function _getPortableTableForeignKeysList($tableForeignKeys)
+    {
+        $list = array();
+        foreach ($tableForeignKeys as $value) {
+            $value = \array_change_key_case($value, CASE_LOWER);
+            if (!isset($list[$value['constraint_name']])) {
+                if ($value['delete_rule'] == "NO ACTION") {
+                    $value['delete_rule'] = null;
+                }
+
+                $list[$value['constraint_name']] = array(
+                    'name' => rtrim($value['constraint_name']),
+                    'local' => array(),
+                    'foreign' => array(),
+                    'foreignTable' => rtrim($value['to_table']),
+                    'onDelete' => rtrim($value['delete_rule']),
+                );
+            }
+            $list[$value['constraint_name']]['local'][$value['field_position']] = rtrim($value['from_field']);
+            $list[$value['constraint_name']]['foreign'][$value['field_position']] = rtrim($value['to_field']);
+        }
+
+        $result = array();
+        foreach($list as $constraint) {
+            $result[] = new ForeignKeyConstraint(
+                array_values($constraint['local']), $constraint['foreignTable'],
+                array_values($constraint['foreign']),  $constraint['name'],
+                array('onDelete' => $constraint['onDelete'])
+            );
+        }
+
+        return $result;
     }
 
 }
